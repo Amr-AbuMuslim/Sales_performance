@@ -62,7 +62,7 @@ export const getTeam = async (): Promise<TeamTargets> => {
 };
 
 // ------------------------------------
-// WRITE OPERATIONS
+// WRITE OPERATION
 // ------------------------------------
 
 export const saveTeam = async (team: TeamTargets) => {
