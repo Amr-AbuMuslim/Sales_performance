@@ -38,8 +38,6 @@ export interface TeamTargets {
   targetFlags: number;
   targetDeals: number;
   targetNights: number;
-  year: number;
-  month: number;
   agents: AgentTarget[];
   createdAt: string;
   updatedAt: string;
