@@ -1,7 +1,7 @@
 // src/services/JsonService.ts
 import { type TeamTargets } from "../types/index";
 
-const API_URL = "http://localhost:3001/api";
+// const API_URL = "http://localhost:3001/api";
 const LS_DB_KEY = "all_monthly_targets"; // Acts as our "Database"
 
 // ------------------------------------
@@ -102,6 +102,53 @@ export const saveMonthlyData = async (data: TeamTargets) => {
     console.error("Save Error", error);
   }
   */
+<<<<<<< HEAD
+=======
+};
+
+// ------------------------------------
+// LEGACY / HELPER OPERATIONS
+// ------------------------------------
+// (Maintained for compatibility if other parts of the app still call 'getTeam')
+
+export const getTeam = async (): Promise<TeamTargets> => {
+  // Just returns the first available record or initializes defaults
+  const db = lsGetDB();
+  if (db.length > 0) return db[0];
+  return await initializeData();
+};
+
+export const saveTeam = async (team: TeamTargets) => {
+  // Redirects to the main save function
+  await saveMonthlyData(team);
+};
+
+// ------------------------------------
+// INITIALIZATION
+// ------------------------------------
+
+export const initializeData = async () => {
+  const now = new Date();
+  const defaultTeam: TeamTargets = {
+    teamId: `init-${now.getTime()}`,
+    teamName: "Main Sales Team",
+    targetFlags: 500,
+    targetDeals: 150,
+    targetNights: 800,
+    month: now.getMonth(),
+    year: now.getFullYear(),
+    agents: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Save to DB
+  const db = lsGetDB();
+  db.push(defaultTeam);
+  lsSetDB(db);
+
+  return defaultTeam;
+>>>>>>> 35d30558109d7d8a04ae877e67c7ccd59ac0cd43
 };
 
 // ------------------------------------
