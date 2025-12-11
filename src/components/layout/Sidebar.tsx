@@ -1,7 +1,8 @@
 import React from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Target, BarChart3, X } from "lucide-react";
+import { Target, BarChart3, X, LogOut } from "lucide-react";
+import { logout, getSession } from "../../services/authService"; // <-- IMPORT
 
 interface SidebarProps {
   isOpen: boolean;
@@ -14,6 +15,14 @@ const navItems = [
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
+  const navigate = useNavigate();
+  const role = getSession(); // admin | supervisor | null
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
   return (
     <>
       {/* Mobile overlay */}
@@ -37,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         className="fixed top-0 left-0 h-full w-64 bg-gradient-to-b from-gray-900 to-gray-800 text-white z-50"
       >
         <div className="flex flex-col h-full">
-          {/* Logo */}
+          {/* Logo + Logout */}
           <div className="flex items-center justify-between p-6 border-b border-gray-700">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
@@ -48,6 +57,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <p className="text-xs text-gray-400">Dashboard</p>
               </div>
             </div>
+
+            {/* Close button for Mobile */}
             <button
               onClick={onClose}
               className="lg:hidden p-1 rounded hover:bg-gray-700 transition-colors"
@@ -55,6 +66,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               <X size={20} />
             </button>
           </div>
+
+          {/* Logout Button */}
+          {role && (
+            <div className="px-4 py-4 border-b border-gray-700">
+              <button
+                onClick={handleLogout}
+                className="w-full flex items-center space-x-3 px-4 py-3 bg-red-600/20 hover:bg-red-600/30 text-red-300 hover:text-red-200 rounded-lg transition-all"
+              >
+                <LogOut size={20} />
+                <span>Logout</span>
+              </button>
+            </div>
+          )}
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-2">

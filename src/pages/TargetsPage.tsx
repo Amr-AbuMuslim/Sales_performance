@@ -7,6 +7,8 @@ import { InputField } from "../components/ui/InputField";
 import { ModalForm } from "../components/ui/ModalForm";
 import { toast } from "sonner";
 import { saveMonthlyData, getMonthlyData } from "../services/JsonService";
+import { getSession } from "../services/authService"; // Import Auth
+import { getTeamNameById } from "../lib/teamHelper"; // Import Helper
 import { AgentCard } from "../components/layout/AgentCard";
 import {
   getWeekdayIndex,
@@ -20,7 +22,6 @@ import {
 } from "../types/index";
 
 export const TargetsPage: React.FC = () => {
-  // --- STATE ---
   const [currentData, setCurrentData] = useState<TeamTargets | null>(null);
 
   // Filters
@@ -43,7 +44,6 @@ export const TargetsPage: React.FC = () => {
 
   // Forms
   const [teamForm, setTeamForm] = useState({
-    teamName: "Sales Team",
     targetFlags: "",
     targetDeals: "",
     targetNights: "",
@@ -58,17 +58,16 @@ export const TargetsPage: React.FC = () => {
   });
 
   const [dayForm, setDayForm] = useState({
-    date: "", // Initialized empty, set on open
+    date: "",
     flags: "",
     deals: "",
     nights: "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-
   const years = generateYearOptions();
 
-  // --- INITIALIZATION & DATA FETCHING ---
+  // --- LOAD DATA ---
   useEffect(() => {
     loadData();
   }, [selectedYear, selectedMonthIndex]);
@@ -80,9 +79,14 @@ export const TargetsPage: React.FC = () => {
       if (data) {
         setCurrentData(data);
       } else {
+        // --- NEW LOGIC: Create Default Object without Modal ---
+        const session = getSession();
+        const teamId = session?.teamId || "unknown";
+        const autoTeamName = getTeamNameById(teamId);
+
         setCurrentData({
-          teamId: `month-${selectedYear}-${selectedMonthIndex}`,
-          teamName: "Sales Team",
+          teamId: teamId, // Important for backend
+          teamName: autoTeamName, // Auto-set name
           month: selectedMonthIndex,
           year: selectedYear,
           targetFlags: 0,
@@ -93,17 +97,17 @@ export const TargetsPage: React.FC = () => {
           updatedAt: new Date().toISOString(),
         } as any);
 
+        // Notify user, but DO NOT open modal
         toast.info(
-          `No data for ${MONTH_NAMES[selectedMonthIndex]}. Set targets to begin.`
+          `Initialized ${MONTH_NAMES[selectedMonthIndex]}. You can now add agents.`
         );
-        setIsEditTeamModalOpen(true);
       }
     } catch (e) {
       toast.error("Failed to load data");
     }
   };
 
-  // --- CALCULATIONS & VALIDATION (Kept same as before) ---
+  // --- CALCULATIONS (Aggregates & Search) ---
   const teamAggregates = useMemo(() => {
     if (!currentData) return { flags: 0, deals: 0, nights: 0 };
     return currentData.agents.reduce(
@@ -116,7 +120,6 @@ export const TargetsPage: React.FC = () => {
           }),
           { flags: 0, deals: 0, nights: 0 }
         );
-
         return {
           flags: acc.flags + agentTotals.flags,
           deals: acc.deals + agentTotals.deals,
@@ -135,15 +138,15 @@ export const TargetsPage: React.FC = () => {
     );
   }, [currentData, searchTerm]);
 
+  // --- VALIDATORS ---
   const validateAgentForm = (values: any, isEdit: boolean) => {
     const newErrors: Record<string, string> = {};
     if (!currentData) return false;
     if (!values.agentName.trim()) newErrors.agentName = "Required";
 
-    // Check remaining logic...
-    let usedFlags = 0;
-    let usedDeals = 0;
-    let usedNights = 0;
+    let usedFlags = 0,
+      usedDeals = 0,
+      usedNights = 0;
     currentData.agents.forEach((agent) => {
       if (isEdit && agent.id === values.id) return;
       usedFlags += agent.targetFlags;
@@ -151,16 +154,12 @@ export const TargetsPage: React.FC = () => {
       usedNights += agent.targetNights;
     });
 
-    const vFlags = Number(values.targetFlags);
-    const vDeals = Number(values.targetDeals);
-    const vNights = Number(values.targetNights);
-
-    if (vFlags > currentData.targetFlags - usedFlags)
-      newErrors.targetFlags = "Exceeds Team Limit";
-    if (vDeals > currentData.targetDeals - usedDeals)
-      newErrors.targetDeals = "Exceeds Team Limit";
-    if (vNights > currentData.targetNights - usedNights)
-      newErrors.targetNights = "Exceeds Team Limit";
+    if (Number(values.targetFlags) > currentData.targetFlags - usedFlags)
+      newErrors.targetFlags = "Exceeds Remaining Limit";
+    if (Number(values.targetDeals) > currentData.targetDeals - usedDeals)
+      newErrors.targetDeals = "Exceeds Remaining Limit";
+    if (Number(values.targetNights) > currentData.targetNights - usedNights)
+      newErrors.targetNights = "Exceeds Remaining Limit";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -168,19 +167,18 @@ export const TargetsPage: React.FC = () => {
 
   const validateTeamForm = () => {
     const newErrors: Record<string, string> = {};
-    if (!teamForm.teamName.trim()) newErrors.teamName = "Required";
+    // No Name Validation needed anymore
     if (!teamForm.targetFlags) newErrors.targetFlags = "Required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   // --- HANDLERS ---
-
   const handleUpdateTeam = async () => {
     if (!currentData || !validateTeamForm()) return;
     const updatedData = {
       ...currentData,
-      teamName: teamForm.teamName,
+      // Name is constant, don't update it from form
       targetFlags: Number(teamForm.targetFlags),
       targetDeals: Number(teamForm.targetDeals),
       targetNights: Number(teamForm.targetNights),
@@ -241,41 +239,27 @@ export const TargetsPage: React.FC = () => {
     toast.success("Agent deleted");
   };
 
-  // --- UPDATED ADD DAY LOGIC ---
   const handleOpenAddDay = (agent: AgentTarget) => {
     setSelectedAgent(agent);
-
-    // 1. Calculate Default Date based on Selection
     const now = new Date();
     let defaultDateStr = "";
-
     if (
       selectedYear === now.getFullYear() &&
       selectedMonthIndex === now.getMonth()
     ) {
-      // If current month is selected, default to Today
       defaultDateStr = now.toISOString().split("T")[0];
     } else {
-      // If another month is selected, default to the 1st of that month
-      // Format: YYYY-MM-DD
       const y = selectedYear;
       const m = String(selectedMonthIndex + 1).padStart(2, "0");
       defaultDateStr = `${y}-${m}-01`;
     }
-
-    setDayForm({
-      date: defaultDateStr,
-      flags: "",
-      deals: "",
-      nights: "",
-    });
+    setDayForm({ date: defaultDateStr, flags: "", deals: "", nights: "" });
     setErrors({});
     setIsAddDayModalOpen(true);
   };
 
   const handleAddDay = async () => {
     if (!selectedAgent || !currentData) return;
-    // Basic validation
     if (!dayForm.date) {
       setErrors({ date: "Required" });
       return;
@@ -315,23 +299,19 @@ export const TargetsPage: React.FC = () => {
     await saveMonthlyData(updatedData);
   };
 
-  // --- HELPER FOR MODAL LIMITS ---
   const getMonthDateLimits = () => {
-    // Calculate min and max date strings (YYYY-MM-DD) for the selected month
     const min = `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, "0")}-01`;
-    // Get last day of month
     const lastDay = new Date(selectedYear, selectedMonthIndex + 1, 0).getDate();
     const max = `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, "0")}-${lastDay}`;
     return { min, max };
   };
 
   // --- RENDER ---
-  if (!currentData)
-    return <div className="p-10 text-center">Loading Data...</div>;
+  if (!currentData) return <div className="p-10 text-center">Loading...</div>;
 
   return (
     <div className="space-y-6">
-      {/* HEADER & FILTERS */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-gray-900 text-2xl font-bold">
@@ -345,7 +325,6 @@ export const TargetsPage: React.FC = () => {
           <Button
             onClick={() => {
               setTeamForm({
-                teamName: currentData.teamName,
                 targetFlags: String(currentData.targetFlags),
                 targetDeals: String(currentData.targetDeals),
                 targetNights: String(currentData.targetNights),
@@ -373,13 +352,14 @@ export const TargetsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* FILTER BAR */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center gap-2">
           <Calendar className="text-gray-400" size={20} />
           <select
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
-            className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm"
+            className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           >
             {years.map((y) => (
               <option key={y} value={y}>
@@ -390,7 +370,7 @@ export const TargetsPage: React.FC = () => {
           <select
             value={selectedMonthIndex}
             onChange={(e) => setSelectedMonthIndex(Number(e.target.value))}
-            className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm"
+            className="bg-gray-50 border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           >
             {MONTH_NAMES.map((m, i) => (
               <option key={i} value={i}>
@@ -409,15 +389,16 @@ export const TargetsPage: React.FC = () => {
             placeholder="Filter agents..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm outline-none w-64"
+            className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 w-64"
           />
         </div>
       </div>
 
-      {/* OVERVIEW CARDS (Same as before) */}
+      {/* TEAM OVERVIEW CARDS */}
       <Card variant="gradient">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white/90 rounded-lg p-4 shadow-sm">
+          {/* FLAGS */}
+          <div className="bg-white/90 backdrop-blur rounded-lg p-4 shadow-sm">
             <span className="text-xs font-bold text-gray-500 uppercase">
               Flags
             </span>
@@ -430,17 +411,17 @@ export const TargetsPage: React.FC = () => {
                 / {currentData.targetFlags}
               </span>
             </div>
-            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2 overflow-hidden">
               <div
-                className="bg-blue-600 h-full rounded-full"
+                className="bg-blue-600 h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min((teamAggregates.flags / currentData.targetFlags) * 100, 100)}%`,
+                  width: `${Math.min((teamAggregates.flags / (currentData.targetFlags || 1)) * 100, 100)}%`,
                 }}
               ></div>
             </div>
           </div>
-          {/* ... Deals and Nights blocks ... */}
-          <div className="bg-white/90 rounded-lg p-4 shadow-sm">
+          {/* DEALS */}
+          <div className="bg-white/90 backdrop-blur rounded-lg p-4 shadow-sm">
             <span className="text-xs font-bold text-gray-500 uppercase">
               Deals
             </span>
@@ -453,16 +434,17 @@ export const TargetsPage: React.FC = () => {
                 / {currentData.targetDeals}
               </span>
             </div>
-            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2 overflow-hidden">
               <div
-                className="bg-green-600 h-full rounded-full"
+                className="bg-green-600 h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min((teamAggregates.deals / currentData.targetDeals) * 100, 100)}%`,
+                  width: `${Math.min((teamAggregates.deals / (currentData.targetDeals || 1)) * 100, 100)}%`,
                 }}
               ></div>
             </div>
           </div>
-          <div className="bg-white/90 rounded-lg p-4 shadow-sm">
+          {/* NIGHTS */}
+          <div className="bg-white/90 backdrop-blur rounded-lg p-4 shadow-sm">
             <span className="text-xs font-bold text-gray-500 uppercase">
               Nights
             </span>
@@ -475,11 +457,11 @@ export const TargetsPage: React.FC = () => {
                 / {currentData.targetNights}
               </span>
             </div>
-            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2">
+            <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2 overflow-hidden">
               <div
-                className="bg-purple-600 h-full rounded-full"
+                className="bg-purple-600 h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${Math.min((teamAggregates.nights / currentData.targetNights) * 100, 100)}%`,
+                  width: `${Math.min((teamAggregates.nights / (currentData.targetNights || 1)) * 100, 100)}%`,
                 }}
               ></div>
             </div>
@@ -487,19 +469,33 @@ export const TargetsPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* AGENTS LIST */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      {/* --- AGENTS LIST (UPDATED DESIGN) --- */}
+      <div className="space-y-4">
+        {/* Only show header on Desktop */}
+        <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+          <div className="col-span-3">Agent</div>
+          <div className="col-span-3 text-center">Targets (F | D | N)</div>
+          <div className="col-span-3 text-center">Actuals (F | D | N)</div>
+          <div className="col-span-2 text-center">Progress</div>
+          <div className="col-span-1 text-right">Action</div>
+        </div>
+
         <AnimatePresence mode="popLayout">
           {filteredAgents.map((agent) => (
             <motion.div
               key={agent.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
             >
               <AgentCard
                 agent={agent}
-                viewMode="monthly"
+                // --- ADD THESE TWO PROPS ---
+                selectedYear={selectedYear}
+                selectedMonthIndex={selectedMonthIndex}
+                // ---------------------------
+
+                // viewMode="monthly" // You can remove this as we handle it internally now
                 onDeleteAgent={handleDeleteAgent}
                 onEditAgent={(a) => {
                   setAgentForm({
@@ -511,7 +507,7 @@ export const TargetsPage: React.FC = () => {
                   });
                   setIsEditAgentModalOpen(true);
                 }}
-                onAddDay={handleOpenAddDay} // Pass the updated handler
+                onAddDay={handleOpenAddDay}
                 onDeleteDay={handleDeleteDay}
               />
             </motion.div>
@@ -519,7 +515,7 @@ export const TargetsPage: React.FC = () => {
         </AnimatePresence>
       </div>
 
-      {/* MODALS */}
+      {/* --- MODALS (Updated: No Name Input) --- */}
       <ModalForm
         isOpen={isEditTeamModalOpen}
         onClose={() => setIsEditTeamModalOpen(false)}
@@ -532,16 +528,7 @@ export const TargetsPage: React.FC = () => {
           }}
           className="space-y-4"
         >
-          <InputField
-            label="Team Name"
-            name="teamName"
-            value={teamForm.teamName}
-            onChange={(e) =>
-              setTeamForm({ ...teamForm, teamName: e.target.value })
-            }
-            error={errors.teamName}
-            required
-          />
+          {/* NAME INPUT REMOVED - AUTOMATIC */}
           <div className="grid grid-cols-3 gap-2">
             <InputField
               name=""
@@ -575,11 +562,13 @@ export const TargetsPage: React.FC = () => {
             />
           </div>
           <Button type="submit" className="w-full mt-4">
-            Save
+            Save Changes
           </Button>
         </form>
       </ModalForm>
 
+      {/* Add Agent Modal & Add Day Modal logic remains same as provided code */}
+      {/* ... (Keep your existing Add Agent & Add Day modals here) ... */}
       <ModalForm
         isOpen={isAddAgentModalOpen || isEditAgentModalOpen}
         onClose={() => {
@@ -604,7 +593,6 @@ export const TargetsPage: React.FC = () => {
             }
             error={errors.agentName}
           />
-          {/* Note: Insert the "Remaining Budget" calculation UI here if needed, same as previous response */}
           <div className="grid grid-cols-3 gap-2">
             <InputField
               name=""
@@ -643,7 +631,6 @@ export const TargetsPage: React.FC = () => {
         </form>
       </ModalForm>
 
-      {/* ADD DAY MODAL - WITH CONSTRAINTS */}
       <ModalForm
         isOpen={isAddDayModalOpen}
         onClose={() => setIsAddDayModalOpen(false)}
@@ -656,7 +643,6 @@ export const TargetsPage: React.FC = () => {
           }}
           className="space-y-4"
         >
-          {/* UPDATED DATE INPUT WITH MIN/MAX */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Date
@@ -670,14 +656,7 @@ export const TargetsPage: React.FC = () => {
               onChange={(e) => setDayForm({ ...dayForm, date: e.target.value })}
               required
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Selecting for: {MONTH_NAMES[selectedMonthIndex]} {selectedYear}
-            </p>
-            {errors.date && (
-              <p className="text-xs text-red-500 mt-1">{errors.date}</p>
-            )}
           </div>
-
           <div className="grid grid-cols-3 gap-2">
             <InputField
               name=""
